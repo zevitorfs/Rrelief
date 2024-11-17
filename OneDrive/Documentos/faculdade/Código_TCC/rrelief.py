@@ -1,58 +1,98 @@
-import pandas as pd
 import numpy as np
-from sklearn.metrics import pairwise_distances
 
-# Função para calcular a diferença entre características
-def diff(feature, instance1, instance2):
-    return abs(instance1[feature] - instance2[feature])
+def load_txt_dataset(file_path, label_columns=2):
+    """
+    Carrega um dataset no formato .txt.
 
-# Função para calcular a diferença entre rótulos usando a distância de Hamming
-def label_diff(labels1, labels2):
-    set1 = set(labels1)
-    set2 = set(labels2)
-    return len(set1.symmetric_difference(set2))
+    Espera que o arquivo tenha:
+    - As primeiras colunas como características (valores numéricos).
+    - As últimas colunas como rótulos binários.
 
-# Função RReliefF
-def rrelieff(X, y, k=5):
-    m, f = X.shape
-    Ndc = 0
-    NdF = np.zeros(f)
-    NdC_dF = np.zeros(f)
-    W = np.zeros(f)
-    
+    Parâmetros:
+    - file_path: Caminho do arquivo .txt.
+    - label_columns: Número de colunas de rótulos binários.
+
+    Retorna:
+    - X: Matriz de características (m x n).
+    - y: Matriz de rótulos binários (m x p).
+    """
+    try:
+        data = np.loadtxt(file_path, delimiter=',')  # Carrega os dados (espera que sejam separados por vírgula)
+        X = data[:, :-label_columns]  # Todas as colunas menos as últimas (assumindo que são rótulos)
+        y = data[:, -label_columns:]  # Últimas colunas como rótulos binários
+        return X, y
+    except Exception as e:
+        print(f"Erro ao carregar o dataset: {e}")
+        return None, None
+
+def diff(S_i: np.ndarray, S_j: np.ndarray, weights: np.ndarray) -> float:
+    """
+    Calcula a diferença no espaço-alvo entre duas instâncias com base nas descrições binárias dos rótulos.
+
+    Parâmetros:
+    - S_i: Vetor de rótulos binários da instância i.
+    - S_j: Vetor de rótulos binários da instância j.
+    - weights: Vetor de pesos para cada rótulo.
+
+    Retorna:
+    - A diferença no espaço-alvo ponderada pelos pesos.
+    """
+    diff_squared = weights * (S_i - S_j)**2
+    return np.sqrt(np.sum(diff_squared))
+
+def RReliefF(X, y, k, weights):
+    """
+    Implementação do algoritmo RReliefF adaptado para Python.
+    """
+    m, n = X.shape
+    _, p = y.shape
+
+    N_DC = np.zeros(n)
+    N_DF = np.zeros(n)
+    N_DC_and_DF = np.zeros(n)
+    W = np.zeros(n)
+
     for i in range(m):
-        Ri = X[i]
-        distances = pairwise_distances([Ri], X)[0]
-        nearest_indices = np.argsort(distances)[1:k+1]
-        
+        R_i = X[i]
+        S_i = y[i]
+
+        distances = np.linalg.norm(X - R_i, axis=1)
+        nearest_indices = np.argsort(distances)[:k+1]
+        nearest_indices = nearest_indices[nearest_indices != i]
+
         for j in nearest_indices:
-            Ij = X[j]
-            d_ij = distances[j]
-            Ndc += label_diff(y[i], y[j]) * d_ij
-            
-            for F in range(f):
-                NdF[F] += diff(F, Ri, Ij) * d_ij
-                NdC_dF[F] += label_diff(y[i], y[j]) * diff(F, Ri, Ij) * d_ij
-    
-    for F in range(f):
-        W[F] = NdC_dF[F] / Ndc - (NdF[F] - NdC_dF[F]) / (m - Ndc)
-    
+            R_j = X[j]
+            S_j = y[j]
+
+            diff_target = diff(S_i, S_j, weights)
+
+            for f in range(n):
+                diff_feature = abs(R_i[f] - R_j[f])
+                N_DC[f] += diff_target * distances[j]
+                N_DF[f] += diff_feature * distances[j]
+                N_DC_and_DF[f] += diff_target * diff_feature * distances[j]
+
+    for f in range(n):
+        if N_DC[f] != 0:
+            W[f] = (N_DC_and_DF[f] / N_DC[f]) - ((N_DF[f] - N_DC_and_DF[f]) / (m - N_DC[f]))
+
     return W
 
-# Carregar o dataset
-df = pd.read_csv('GOCellcycleTeste.txt', header=None)
+# Caminho do arquivo .txt
+file_path = "GOCellcycleTeste.txt"
 
-# Separar as características (features) dos rótulos (labels)
-features = df.iloc[:, :-1].values
-labels = df.iloc[:, -1].apply(lambda x: x.split('@')).values
+# Carrega o dataset
+X, y = load_txt_dataset(file_path)
 
-# Exibir as primeiras linhas das características e dos rótulos
-print("Características (primeiras 5 linhas):")
-print(features[:5])
-print("\nRótulos (primeiras 5 linhas):")
-print(labels[:5])
+if X is not None and y is not None:
+    # Pesos dos rótulos
+    weights = [0.5, 0.5]
 
-# Executar o RReliefF com o dataset carregado
-pesos = rrelieff(features, labels)
-print("\nPesos das Características:")
-print(pesos)
+    # Número de vizinhos
+    k = 2
+
+    # Executa o algoritmo
+    W = RReliefF(X, y, k, weights)
+    print(f"Relevância das características: {W}")
+else:
+    print("Falha ao carregar o dataset.")
