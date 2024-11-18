@@ -1,75 +1,109 @@
 import numpy as np
 
-
-def calcular_importancia_rrelief(dados, resultados, num_vizinhos):
+def load_txt_dataset(file_path, label_columns=2, delimiter=","):
     """
-    Calcula a importância de cada característica usando o algoritmo RReliefF adaptado para classificação hierárquica multirrótulo.
+    Carrega um dataset no formato .txt.
+
+    Espera que o arquivo tenha:
+    - As primeiras colunas como características (valores numéricos).
+    - As últimas colunas como rótulos binários.
 
     Parâmetros:
-    - dados: matriz de dados (numpy array ou lista de listas)
-    - resultados: lista de listas de rótulos (multirrótulo)
-    - num_vizinhos: número de vizinhos mais próximos a considerar
+    - file_path: Caminho do arquivo .txt.
+    - label_columns: Número de colunas de rótulos binários.
+    - delimiter: Delimitador usado no arquivo .txt.
 
     Retorna:
-    - Importância de cada característica (lista)
+    - X: Matriz de características (m x n).
+    - y: Matriz de rótulos binários (m x p).
     """
-    num_instancias, num_caracteristicas = dados.shape
-    Ndc = 0
-    NdF = np.zeros(num_caracteristicas)
-    NdC_dF = np.zeros(num_caracteristicas)
-    W = np.zeros(num_caracteristicas)
+    try:
+        data = np.loadtxt(file_path, delimiter=delimiter)
+        if data.shape[1] <= label_columns:
+            raise ValueError("Número de colunas de rótulos é maior ou igual ao número total de colunas no dataset.")
+        
+        X = data[:, :-label_columns]
+        y = data[:, -label_columns:]
+        return X, y
+    except Exception as e:
+        print(f"Erro ao carregar o dataset: {e}")
+        return None, None
 
-    for i in range(num_instancias):
-        instancia_atual = dados[i]
-        distancias = np.linalg.norm(dados - instancia_atual, axis=1)
-        vizinhos_proximos = np.argsort(distancias)[1:num_vizinhos + 1]
+def diff(S_i, S_j, weights):
+    diff_squared = weights * (S_i - S_j) ** 2
+    return np.sqrt(np.sum(diff_squared))
 
-        for j in vizinhos_proximos:
-            vizinho = dados[j]
-            peso = np.exp(-distancias[j])
+def RReliefF(X, y, k, weights):
+    """
+    Implementação do algoritmo RReliefF adaptado para Python
+    
+    Parâmetros:
+    X : np.ndarray
+        Matriz de características.
+    y : np.ndarray
+        Vetor de rótulos.
+    k : int
+        Número de vizinhos mais próximos a considerar.
+    weights : np.ndarray
+        Pesos para as características.
+    
+    Retorna:
+    np.ndarray
+        Vetor de pesos das características.
+    """
+    m, n = X.shape
+    _, p = y.shape
 
-            # Atualiza Ndc com a diferença ponderada entre os rótulos
-            Ndc += calcular_diferenca_rotulos(resultados[i], resultados[j]) * peso
+    N_DC = np.zeros(n)
+    N_DF = np.zeros(n)
+    N_DC_and_DF = np.zeros(n)
+    W = np.zeros(n)
 
-            for F in range(num_caracteristicas):
-                diferenca_caracteristica = abs(dados[i][F] - dados[j][F])
+    # Pré-calcular todas as distâncias
+    all_distances = np.linalg.norm(X[:, np.newaxis] - X, axis=2)
 
-                # Atualiza NdF[F] com a diferença ponderada da característica
-                NdF[F] += diferenca_caracteristica * peso
+    for i in range(m):
+        R_i = X[i]
+        S_i = y[i]
 
-                # Atualiza NdC&dF[F] com a diferença ponderada entre os rótulos e a característica
-                NdC_dF[F] += calcular_diferenca_rotulos(resultados[i], resultados[j]) * diferenca_caracteristica * peso
+        distances = all_distances[i]
+        nearest_indices = np.argsort(distances)[: k + 1]
+        nearest_indices = nearest_indices[nearest_indices != i]
 
-    for F in range(num_caracteristicas):
-        if Ndc > 0:  # Para evitar divisão por zero
-            W[F] = NdC_dF[F] / Ndc - (NdF[F] - NdC_dF[F]) / (num_instancias - Ndc)
+        for j in nearest_indices:
+            R_j = X[j]
+            S_j = y[j]
+
+            diff_target = diff(S_i, S_j, weights)
+
+            for f in range(n):
+                diff_feature = abs(R_i[f] - R_j[f])
+                N_DC[f] += diff_target * distances[j]
+                N_DF[f] += diff_feature * distances[j]
+                N_DC_and_DF[f] += diff_target * diff_feature * distances[j]
+
+    for f in range(n):
+        if N_DF[f] != 0:
+            W[f] = N_DC_and_DF[f] / N_DF[f] - N_DC[f] / N_DF[f]
 
     return W
 
+# Carregar o dataset
+file_path = "GOCellcycleTeste.txt"
+X, y = load_txt_dataset(file_path, label_columns=2, delimiter=",")
 
-def calcular_diferenca_rotulos(rotulos1, rotulos2):
-    """
-    Calcula a diferença entre dois conjuntos de rótulos.
+if X is not None and y is not None:
+    # Pesos dos rótulos
+    weights = [0.5, 0.5]
 
-    Parâmetros:
-    - rotulos1: lista de rótulos da primeira instância
-    - rotulos2: lista de rótulos da segunda instância
+    # Número de vizinhos
+    k = 2
 
-    Retorna:
-    - Diferença entre os rótulos (float)
-    """
-    return sum(1 for r1, r2 in zip(rotulos1, rotulos2) if r1 != r2)
+    # Executa o algoritmo
+    W = RReliefF(X, y, k, weights)
+    print(f"Relevância das características: {W}")
 
-
-# Função para calcular a distância euclidiana entre duas instâncias (linhas de dados)
-def distancia_euclidiana(linha1, linha2):
-    return np.linalg.norm(np.array(linha1) - np.array(linha2))
-
-
-# Exemplo de uso
-dados = np.array([[1, 2], [2, 3], [3, 4], [4, 5]])
-resultados = [[0, 1], [1, 2], [0, 2], [1, 3]]
-num_vizinhos = 2
-
-importancia = calcular_importancia_rrelief(dados, resultados, num_vizinhos)
-print(importancia)
+    # Salvar os resultados em um arquivo .txt
+    np.savetxt("melhores_caracteristicas.txt", W, delimiter=",")
+else:
+    print("Falha ao carregar o dataset.")
